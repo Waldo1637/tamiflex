@@ -72,7 +72,13 @@ public class ClassReplacer implements ClassFileTransformer {
             if (containsGeneratedClassName(className)) {
                 storeClassBytesOfGeneratedClass(className, classfileBuffer);
             }
-            return tryToReplaceClassBytes(className);
+
+            byte[] newClassBytes = tryToReplaceClassBytes(className);
+            if (verbose) {
+                boolean replaced = newClassBytes != null;
+                Logger.printInfo(className, replaced, replaced && !Arrays.equals(newClassBytes, classfileBuffer));
+            }
+            return newClassBytes;
         } catch (RuntimeException e) {
             e.printStackTrace();
             throw e;
