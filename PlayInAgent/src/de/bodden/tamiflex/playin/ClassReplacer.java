@@ -62,6 +62,7 @@ public class ClassReplacer implements ClassFileTransformer {
         this.loader = createClassLoader(srcPath);
     }
 
+    @Override
     public byte[] transform(ClassLoader ldr, String className, Class<?> classBeingRedefined, ProtectionDomain protectionDomain, byte[] classfileBuffer) throws IllegalClassFormatException {
         numInvoked++;
         if (className == null) {
@@ -162,9 +163,9 @@ public class ClassReplacer implements ClassFileTransformer {
                 }
             }
         } catch (Exception e) {
-            //print the exception before we re-throw it because otherwise the transformation
-            //framework may just swallow it
-            RuntimeException e2 = new RuntimeException("Exception in class dumper", e);
+            //print the exception before we re-throw it because otherwise the 
+            //transformation framework may just swallow it
+            RuntimeException e2 = new RuntimeException("Exception in class replacer", e);
             e2.printStackTrace();
             throw e2;
         }
