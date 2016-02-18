@@ -198,8 +198,7 @@ public class ClassReplacer implements ClassFileTransformer {
                 e.printStackTrace();
             }
         }
-        URLClassLoader loader = new URLClassLoader(urls, null);
-        return loader;
+        return new RestrictedURLClassLoader(urls);
     }
 
     /**
