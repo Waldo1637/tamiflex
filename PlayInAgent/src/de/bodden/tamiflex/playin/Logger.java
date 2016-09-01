@@ -12,15 +12,13 @@ import java.nio.file.StandardOpenOption;
  */
 public class Logger {
 
-    private Logger() {
-    }
+    private static final Path LOG_FILE = Paths.get("PIA.log");
 
-    private static final Path OUTPUT_FILE = Paths.get("PIA.log");
-
-    public static void printInfo(String className, boolean replaced, boolean modified) {
+    public static void printInfo(String className, boolean replaced, boolean modified, String failReason) {
         StringBuilder sb = new StringBuilder(className);
-        sb.append(",").append(replaced?"replaced":"not replaced");
-        sb.append(",").append(modified?"modified":"not modified");
+        sb.append(",").append(replaced ? "replaced" : "not replaced");
+        sb.append(",").append(modified ? "modified" : "not modified");
+        sb.append(",").append(failReason);
         println(sb.toString());
     }
 
@@ -34,9 +32,12 @@ public class Logger {
 
     public static void print(String s) {
         try {
-            Files.write(OUTPUT_FILE, s.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            Files.write(LOG_FILE, s.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (IOException ex) {
             throw new RuntimeException(ex);
         }
+    }
+
+    private Logger() {
     }
 }

@@ -7,15 +7,12 @@
  *
  * Contributors:
  *     Eric Bodden - initial API and implementation
- *****************************************************************************/
+ ******************************************************************************/
 package de.bodden.tamiflex.playout;
 
-import static de.bodden.tamiflex.normalizer.Hasher.containsGeneratedClassName;
-import static de.bodden.tamiflex.normalizer.Hasher.generateHashNumber;
-import static de.bodden.tamiflex.normalizer.Hasher.hashedClassNameForGeneratedClassName;
-import static de.bodden.tamiflex.normalizer.Hasher.replaceGeneratedClassNamesByHashedNames;
+import static de.bodden.tamiflex.normalizer.Hasher.*;
+import de.bodden.tamiflex.normalizer.NameExtractor;
 import static de.bodden.tamiflex.playout.rt.ShutdownStatus.hasShutDown;
-
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -28,9 +25,10 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 
-import de.bodden.tamiflex.normalizer.NameExtractor;
-
 public class ClassDumper implements ClassFileTransformer {
+
+    private static final boolean PRINT_CLASS_LOADERS = false;
+    private static final boolean PRINT_LOADED_CLASSES = true;
 
     protected final File outDir;
 
@@ -41,7 +39,7 @@ public class ClassDumper implements ClassFileTransformer {
      * generated classes, and when determining a hash code for <i>a</i>, the
      * hash code for those referenced classes must already have been computed.
      */
-    protected final LinkedHashMap<String, byte[]> classNameToBytes = new LinkedHashMap<String, byte[]>();
+    protected final LinkedHashMap<String, byte[]> classNameToBytes = new LinkedHashMap<>();
 
     private final boolean verbose;
 
@@ -53,12 +51,24 @@ public class ClassDumper implements ClassFileTransformer {
         this.outDir = outDir;
         this.dontReallyDump = dontReallyDump;
         this.verbose = verbose;
+        this.newClasses = 0;
+        if (PRINT_CLASS_LOADERS) {
+            ClassLoadInfoPrinter.println();
+            ClassLoadInfoPrinter.printLoaderAndParents("ClassDumper", "ClassDumper", ClassDumper.class.getClassLoader());
+            ClassLoadInfoPrinter.printLoaderAndParents("ClassDumper", "Context", Thread.currentThread().getContextClassLoader());
+            ClassLoadInfoPrinter.println();
+        }
     }
 
+    @Override
     public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined, ProtectionDomain protectionDomain, byte[] classfileBuffer) throws IllegalClassFormatException {
         if (className == null) {
             className = NameExtractor.extractName(classfileBuffer);
         }
+        if (PRINT_CLASS_LOADERS) {
+            ClassLoadInfoPrinter.printLoaderAndParents("ClassDumper", className.replace("/", "."), loader);
+        }
+
         if (hasShutDown) {
             return null;
         }
@@ -69,6 +79,14 @@ public class ClassDumper implements ClassFileTransformer {
         byte[] oldBytes;
         synchronized (this) {
             oldBytes = classNameToBytes.put(className, classfileBuffer);
+            if (PRINT_LOADED_CLASSES) {
+                ClassLoadInfoPrinter.print("[ClassDumper] " + className + " (v" + classfileBuffer[7] + ") ");
+                try {
+                    ClassLoadInfoPrinter.println("loaded from " + protectionDomain.getCodeSource().getLocation());
+                } catch (NullPointerException ex) {
+                    ClassLoadInfoPrinter.println("loaded from (null)");
+                }
+            }
         }
 
         if (verbose && oldBytes != null && !Arrays.equals(classfileBuffer, oldBytes)) {
@@ -122,13 +140,13 @@ public class ClassDumper implements ClassFileTransformer {
                     fos = new FileOutputStream(outFile);
                     fos.write(classfileBuffer);
                 } catch (IOException e) {
-                    e.printStackTrace();
+                    e.printStackTrace(Agent.err());
                 } finally {
                     if (fos != null) {
                         try {
                             fos.close();
                         } catch (IOException e) {
-                            e.printStackTrace();
+                            e.printStackTrace(Agent.err());
                         }
                     }
                 }

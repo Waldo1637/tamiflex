@@ -10,9 +10,11 @@
  *****************************************************************************/
 package de.bodden.tamiflex.playin;
 
+import de.bodden.tamiflex.normalizer.ClassRenamer;
+import de.bodden.tamiflex.normalizer.Hasher;
 import static de.bodden.tamiflex.normalizer.Hasher.containsGeneratedClassName;
+import de.bodden.tamiflex.normalizer.NameExtractor;
 import static de.bodden.tamiflex.normalizer.ReferencedGeneratedClasses.nameOfGeneratedClassReferenced;
-
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.InputStream;
@@ -25,14 +27,25 @@ import java.security.ProtectionDomain;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
-
 import org.objectweb.asm.ClassVisitor;
 
-import de.bodden.tamiflex.normalizer.ClassRenamer;
-import de.bodden.tamiflex.normalizer.Hasher;
-import de.bodden.tamiflex.normalizer.NameExtractor;
-
 public class ClassReplacer implements ClassFileTransformer {
+
+    /**
+     * Thrown when bytes cannot be replaced for a commonly known reason.
+     */
+    private static class CannotReplace extends Throwable {
+
+        enum Reason {
+            ASM, TamiFlex, NotFound
+        };
+
+        public final Reason reason;
+
+        CannotReplace(Reason r) {
+            reason = r;
+        }
+    }
 
     private static final String ASM_PKGNAME = ClassVisitor.class.getPackage().getName().replace('.', '/');
 
@@ -53,9 +66,10 @@ public class ClassReplacer implements ClassFileTransformer {
      * {@link Hasher#containsGeneratedClassName(String)} to determine if a class
      * is generated in this sense.
      */
-    protected Map<String, byte[]> generatedClassNameToOriginalBytes = new HashMap<String, byte[]>();
+    protected Map<String, byte[]> generatedClassNameToOriginalBytes = new HashMap<>();
 
-    public int numInvoked, numSuccess;
+    public long numInvoked = 0, numSuccess = 0, numFailed = 0;
+    public long numJava = 0, numSun = 0, numASM = 0, numTFlex = 0, numNotFound = 0;
 
     public ClassReplacer(String srcPath, boolean verbose) {
         this.verbose = verbose;
@@ -68,6 +82,11 @@ public class ClassReplacer implements ClassFileTransformer {
         if (className == null) {
             className = NameExtractor.extractName(classfileBuffer);
         }
+        if (className.startsWith("java/")) {
+            numJava++;
+        } else if (className.startsWith("sun/")) {
+            numSun++;
+        }
         try {
             if (containsGeneratedClassName(className)) {
                 storeClassBytesOfGeneratedClass(className, classfileBuffer);
@@ -75,26 +94,40 @@ public class ClassReplacer implements ClassFileTransformer {
 
             byte[] newClassBytes = tryToReplaceClassBytes(className);
             if (verbose) {
-                boolean replaced = newClassBytes != null;
-                Logger.printInfo(className, replaced, replaced && !Arrays.equals(newClassBytes, classfileBuffer));
+                Logger.printInfo(className, true, !Arrays.equals(newClassBytes, classfileBuffer), "");
             }
+            numSuccess++;
             return newClassBytes;
-        } catch (RuntimeException e) {
-            e.printStackTrace();
-            throw e;
-        } catch (Error e) {
-            e.printStackTrace();
+        } catch (CannotReplace e) {
+            if (verbose) {
+                Logger.printInfo(className, false, false, e.reason.toString());
+            }
+            numFailed++;
+            switch (e.reason) {
+                case ASM:
+                    numASM++;
+                    break;
+                case TamiFlex:
+                    numTFlex++;
+                    break;
+                case NotFound:
+                    numNotFound++;
+                    break;
+            }
+            return null;
+        } catch (RuntimeException | Error e) {
+            e.printStackTrace(Agent.err());
             throw e;
         }
     }
 
-    private byte[] tryToReplaceClassBytes(final String className) {
+    private byte[] tryToReplaceClassBytes(final String className) throws CannotReplace {
         try {
             if (className.startsWith(Agent.PKGNAME)) {
-                return null;
+                throw new CannotReplace(CannotReplace.Reason.TamiFlex);
             }
             if (className.startsWith(ASM_PKGNAME)) {
-                return null;
+                throw new CannotReplace(CannotReplace.Reason.ASM);
             }
 
             //check if the class is generated, and if so generate a hashed class name and use that name in what follows
@@ -117,9 +150,9 @@ public class ClassReplacer implements ClassFileTransformer {
             }
 
             String classFileName = classNameInFileSystem + ".class";
-
             InputStream is = loader.getResourceAsStream(classFileName);
             if (is == null) {
+                /*
                 if (verbose) {
                     if (isGeneratedClass) {
                         System.err.println("WARNING: Cannot find class " + classNameInFileSystem + ". Will use original class " + className + " instead.");
@@ -127,8 +160,9 @@ public class ClassReplacer implements ClassFileTransformer {
                         System.err.println("WARNING: Cannot find class " + classNameInFileSystem + ". Will use original class instead.");
                     }
                 }
+                 */
                 //leave bytecodes unchanged
-                return null;
+                throw new CannotReplace(CannotReplace.Reason.NotFound);
             } else {
                 try {
                     //read the class file from disk
@@ -148,7 +182,7 @@ public class ClassReplacer implements ClassFileTransformer {
                         String refOrig = nameOfGeneratedClassReferenced(className, originalBytes);
                         String refHashed = nameOfGeneratedClassReferenced(classNameInFileSystem, readBytes);
 
-                        Map<String, String> fromTo = new HashMap<String, String>();
+                        Map<String, String> fromTo = new HashMap<>();
                         //rename declaring class
                         fromTo.put(classNameInFileSystem, className);
                         //rename referenced class, if any 
@@ -162,7 +196,6 @@ public class ClassReplacer implements ClassFileTransformer {
                         }
                     }
 
-                    numSuccess++;
                     return readBytes;
                 } finally {
                     is.close();
@@ -172,7 +205,7 @@ public class ClassReplacer implements ClassFileTransformer {
             //print the exception before we re-throw it because otherwise the 
             //transformation framework may just swallow it
             RuntimeException e2 = new RuntimeException("Exception in class replacer", e);
-            e2.printStackTrace();
+            e2.printStackTrace(Agent.err());
             throw e2;
         }
     }
@@ -195,7 +228,7 @@ public class ClassReplacer implements ClassFileTransformer {
             try {
                 urls[i++] = new File(segment).toURI().toURL();
             } catch (MalformedURLException e) {
-                e.printStackTrace();
+                e.printStackTrace(Agent.err());
             }
         }
         return new RestrictedURLClassLoader(urls);

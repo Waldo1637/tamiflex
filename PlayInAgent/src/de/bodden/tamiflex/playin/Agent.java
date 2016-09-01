@@ -10,24 +10,33 @@
  *****************************************************************************/
 package de.bodden.tamiflex.playin;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
+import de.bodden.tamiflex.normalizer.Hasher;
+import java.io.*;
 import java.lang.instrument.IllegalClassFormatException;
 import java.lang.instrument.Instrumentation;
 import java.lang.instrument.UnmodifiableClassException;
 import java.net.URISyntaxException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Properties;
-
-import de.bodden.tamiflex.normalizer.Hasher;
 
 /**
  * This agent registers a {@link ClassReplacer} as a class-file transformer.
  */
 public class Agent {
+
+    private static final Path ERROR_FILE = Paths.get("PIA.err");
+    private static PrintStream ERR_LOG;
+
+    public static PrintStream err() {
+        if (ERR_LOG == null) {
+            try {
+                ERR_LOG = new PrintStream(ERROR_FILE.toFile());
+            } catch (FileNotFoundException e) {
+            }
+        }
+        return ERR_LOG;
+    }
 
     public final static String PKGNAME = Agent.class.getPackage().getName().replace('.', '/');
 
@@ -35,7 +44,6 @@ public class Agent {
     private static boolean verbose = false;
 
     public static void premain(String agentArgs, Instrumentation inst) throws IOException, ClassNotFoundException, UnmodifiableClassException, URISyntaxException, IllegalClassFormatException {
-
         System.out.println("=======================================================");
         System.out.println("TamiFlex Play-In Agent Version " + Agent.class.getPackage().getImplementationVersion());
         loadProperties();
@@ -48,7 +56,14 @@ public class Agent {
             public void run() {
                 System.out.println("\n=======================================================");
                 System.out.println("TamiFlex Play-In Agent Version " + Agent.class.getPackage().getImplementationVersion());
-                System.out.println("Replaced " + replacer.numSuccess + " out of " + replacer.numInvoked + " classes.");
+                System.out.println("Total classes loaded = " + replacer.numInvoked);
+                System.out.println("\tjava.* classes = " + replacer.numJava);
+                System.out.println("\tsun.* classes = " + replacer.numSun);
+                System.out.println("Replaced classes = " + replacer.numSuccess);
+                System.out.println("Unreplaced classes = " + replacer.numFailed);
+                System.out.println("\tASM classes = " + replacer.numASM);
+                System.out.println("\tTamiFlex classes = " + replacer.numTFlex);
+                System.out.println("\tClasses not found = " + replacer.numNotFound);
                 System.out.println("=======================================================");
             }
         });
@@ -65,6 +80,10 @@ public class Agent {
                     System.out.println("WARNING: Cannot replace class " + c.getName());
                 }
             }
+        }
+
+        if (ERR_LOG != null) {
+            ERR_LOG.close();
         }
     }
 
@@ -83,7 +102,7 @@ public class Agent {
                     foundFile = file;
                     break;
                 } catch (FileNotFoundException e) {
-                    e.printStackTrace();
+                    e.printStackTrace(ERR_LOG);
                 }
             }
         }
@@ -122,9 +141,8 @@ public class Agent {
             if (!dir.exists()) {
                 dir.mkdirs();
             }
-            try {
-                FileOutputStream fos = new FileOutputStream(f);
-                InputStream is = Agent.class.getClassLoader().getResourceAsStream(f.getName());
+            try (FileOutputStream fos = new FileOutputStream(f);
+                    InputStream is = Agent.class.getClassLoader().getResourceAsStream(f.getName())) {
                 if (is == null) {
                     throw new InternalError("No default properties file found in agent JAR file!");
                 }
@@ -132,10 +150,8 @@ public class Agent {
                 while ((i = is.read()) != -1) {
                     fos.write(i);
                 }
-                fos.close();
-                is.close();
             } catch (Exception e) {
-                e.printStackTrace();
+                e.printStackTrace(ERR_LOG);
             }
         }
     }

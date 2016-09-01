@@ -7,30 +7,39 @@
  *
  * Contributors:
  *     Eric Bodden - initial API and implementation
- *****************************************************************************/
+ ******************************************************************************/
 package de.bodden.tamiflex.playout;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
+import de.bodden.tamiflex.normalizer.Hasher;
+import de.bodden.tamiflex.playout.rt.ReflLogger;
+import de.bodden.tamiflex.playout.rt.ShutdownStatus;
+import java.io.*;
 import java.lang.instrument.Instrumentation;
 import java.lang.instrument.UnmodifiableClassException;
 import java.net.Socket;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 import java.util.Properties;
 import java.util.jar.JarFile;
 
-import de.bodden.tamiflex.normalizer.Hasher;
-import de.bodden.tamiflex.playout.rt.ReflLogger;
-import de.bodden.tamiflex.playout.rt.ShutdownStatus;
-
 public class Agent {
+
+    private static final Path ERROR_FILE = Paths.get("POA.err");
+    private static PrintStream ERR_LOG;
+
+    public static PrintStream err() {
+        if (ERR_LOG == null) {
+            try {
+                ERR_LOG = new PrintStream(ERROR_FILE.toFile());
+            } catch (FileNotFoundException e) {
+            }
+        }
+        return ERR_LOG;
+    }
 
     public final static String PKGNAME = Agent.class.getPackage().getName().replace('.', '/');
 
@@ -119,7 +128,7 @@ public class Agent {
                     try {
                         socket.close();
                     } catch (IOException e) {
-                        e.printStackTrace();
+                        e.printStackTrace(err());
                     }
                 }
                 classDumper.writeClassesToDisk();
@@ -136,13 +145,17 @@ public class Agent {
                         DBDumper.dumpFileToDatabase(jarfile, logFile);
                     }
                 } catch (URISyntaxException e) {
-                    e.printStackTrace();
+                    e.printStackTrace(err());
                 }
             }
 
         });
 
         System.out.println("============================================================");
+
+        if (ERR_LOG != null) {
+            ERR_LOG.close();
+        }
     }
 
     private static void loadProperties() {
@@ -160,7 +173,7 @@ public class Agent {
                     foundFile = file;
                     break;
                 } catch (FileNotFoundException e) {
-                    e.printStackTrace();
+                    e.printStackTrace(err());
                 }
             }
         }
@@ -209,9 +222,8 @@ public class Agent {
             if (!dir.exists()) {
                 dir.mkdirs();
             }
-            try {
-                FileOutputStream fos = new FileOutputStream(f);
-                InputStream is = Agent.class.getClassLoader().getResourceAsStream(f.getName());
+            try (FileOutputStream fos = new FileOutputStream(f);
+                    InputStream is = Agent.class.getClassLoader().getResourceAsStream(f.getName())) {
                 if (is == null) {
                     fos.close();
                     throw new InternalError("No default properties file found in agent JAR file!");
@@ -220,10 +232,8 @@ public class Agent {
                 while ((i = is.read()) != -1) {
                     fos.write(i);
                 }
-                fos.close();
-                is.close();
             } catch (Exception e) {
-                e.printStackTrace();
+                e.printStackTrace(err());
             }
         }
     }
